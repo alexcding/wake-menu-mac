@@ -18,8 +18,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleName</key><string>WakeMenu</string>
     <key>CFBundleDisplayName</key><string>WakeMenu</string>
     <key>CFBundleIdentifier</key><string>local.wakemenu.app</string>
-    <key>CFBundleVersion</key><string>1.0</string>
-    <key>CFBundleShortVersionString</key><string>1.0</string>
+    <key>CFBundleVersion</key><string>1.0.1</string>
+    <key>CFBundleShortVersionString</key><string>1.0.1</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleExecutable</key><string>WakeMenu</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
