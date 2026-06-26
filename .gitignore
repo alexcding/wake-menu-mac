@@ -1,0 +1,15 @@
+# Build output
+WakeMenu.app/
+*.o
+*.dSYM/
+build/
+dist/
+*.zip
+
+# macOS
+.DS_Store
+
+# Editor/IDE
+.vscode/
+.idea/
+*.xcuserstate
