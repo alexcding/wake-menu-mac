@@ -54,6 +54,25 @@ enum Net {
         return "\(parts[0]).\(parts[1]).\(parts[2])."
     }
 
+    /// The interface the kernel uses to reach the local subnet (e.g. "en0").
+    /// On a multi-homed Mac this disambiguates which ARP entries are authoritative.
+    static func subnetInterface() -> String? {
+        guard let prefix = localPrefix() else { return nil }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/sbin/route")
+        p.arguments = ["-n", "get", "\(prefix)1"]
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = Pipe()
+        do { try p.run() } catch { return nil }
+        p.waitUntilExit()
+        let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        for line in out.split(separator: "\n") where line.contains("interface:") {
+            return line.split(separator: ":").last?.trimmingCharacters(in: .whitespaces)
+        }
+        return nil
+    }
+
     /// Ping every host in the local /24 to populate the ARP cache. Blocks until done (~a few s).
     static func pingSweep() {
         guard let prefix = localPrefix() else { return }
@@ -171,8 +190,10 @@ enum Pinger {
         p.waitUntilExit()
     }
 
-    /// Whole ARP table as canonical-MAC → IP. Used to locate a PC by its MAC.
-    static func arpMapByMAC() -> [String: String] {
+    /// Canonical-MAC → IP from the ARP table. Only counts *complete* entries; when an interface
+    /// is given, only entries on that interface — so a stale entry left on another (multi-homed)
+    /// interface for a powered-off host is ignored.
+    static func arpMapByMAC(onInterface iface: String? = nil) -> [String: String] {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/sbin/arp")
         p.arguments = ["-a", "-n"]
@@ -184,6 +205,8 @@ enum Pinger {
         let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         var map: [String: String] = [:]
         for line in out.split(separator: "\n") {
+            if line.contains("incomplete") { continue }
+            if let iface, !line.contains(" on \(iface) ") && !line.contains(" on \(iface)\t") { continue }
             guard let ipStart = line.firstIndex(of: "("), let ipEnd = line.firstIndex(of: ")"),
                   let at = line.range(of: " at ") else { continue }
             let ip = String(line[line.index(after: ipStart)..<ipEnd])
@@ -198,9 +221,10 @@ enum Pinger {
     /// Resolve a MAC to its current IP: read ARP; if absent, sweep once and re-read.
     static func resolveIP(forMAC mac: String) -> String? {
         guard let want = canonMAC(mac) else { return nil }
-        if let ip = arpMapByMAC()[want] { return ip }
+        let iface = Net.subnetInterface()
+        if let ip = arpMapByMAC(onInterface: iface)[want] { return ip }
         Net.pingSweep()
-        return arpMapByMAC()[want]
+        return arpMapByMAC(onInterface: iface)[want]
     }
 
     /// Canonical MAC: 6 colon-separated 2-digit lowercase hex octets, or nil.
@@ -364,11 +388,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSTabl
         let canSweep = (lastSweep.map { Date().timeIntervalSince($0) > 45 } ?? true)
 
         DispatchQueue.global(qos: .utility).async {
+            let iface = Net.subnetInterface()        // authoritative interface for ARP reads
+
             // 1) Refresh ARP entries for IPs we last saw these PCs at.
             for ip in Set(knownIPs.values) { Pinger.poke(ip) }
 
-            // 2) First pass over the existing ARP table.
-            var map = Pinger.arpMapByMAC()
+            // 2) First pass over the existing ARP table (active interface only).
+            var map = Pinger.arpMapByMAC(onInterface: iface)
             let needSweep = snapshot.contains { host in
                 guard let c = Pinger.canonMAC(host.mac) else { return false }
                 return map[c] == nil
@@ -378,7 +404,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSTabl
             var didSweep = false
             if needSweep && canSweep {
                 Net.pingSweep()
-                map = Pinger.arpMapByMAC()
+                map = Pinger.arpMapByMAC(onInterface: iface)
                 didSweep = true
             }
 
@@ -659,7 +685,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSTabl
         scanSpinner?.startAnimation(nil)
         DispatchQueue.global(qos: .userInitiated).async {
             Net.pingSweep()
-            let map = Pinger.arpMapByMAC()                  // canonMAC → ip
+            let map = Pinger.arpMapByMAC(onInterface: Net.subnetInterface())   // canonMAC → ip
             let list = map.map { (ip: $0.value, mac: $0.key, name: "") }
                 .sorted { Self.ipLess($0.ip, $1.ip) }
             DispatchQueue.main.async {
