@@ -48,8 +48,8 @@ Grab `WakeMenu.app.zip` from the [Releases](../../releases) page, unzip, and mov
 ### Option B — build from source
 
 ```sh
-git clone https://github.com/alexcding/WakeMenu.git
-cd WakeMenu
+git clone https://github.com/alexcding/wake-menu-mac.git
+cd wake-menu-mac
 ./build.sh
 open WakeMenu.app
 ```
