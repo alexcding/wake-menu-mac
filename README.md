@@ -109,4 +109,4 @@ A host present in the ARP table is online — and ARP works below the firewall l
 
 ## License
 
-[MIT](LICENSE) © Alex Ding
+[MIT](LICENSE) © alexcding
