@@ -4,6 +4,10 @@ A tiny macOS **menu bar app** for waking PCs on your local network via **Wake-on
 
 No Dock icon, no dependencies, no Electron — just a single native Swift binary that lives in your menu bar.
 
+<p align="center">
+  <img src="docs/screenshot.png" alt="WakeMenu management window — network scan, saved PCs with live status, and add form" width="420">
+</p>
+
 ```
 ⏻  ● Office PC          ← click to wake (green = online, red = offline)
    ● Gaming PC
