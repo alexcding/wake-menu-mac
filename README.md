@@ -25,6 +25,7 @@ No Dock icon, no dependencies, no Electron — just a single native Swift binary
 - **Firewall-proof status** — detects "online" via ARP, so a PC shows as up even when its firewall blocks ping (Windows' default).
 - **Network scanner** — scan the LAN and pick a device from a list (with reverse-DNS / NetBIOS name resolution) to auto-fill the add form.
 - **Management window** — add / edit / remove / wake PCs from a proper UI, with a saved-PCs table and a discovery table.
+- **Launch at Login** — one toggle in the menu (uses `SMAppService`); also manageable from System Settings → Login Items.
 - **Self-contained** — one `.app`, ad-hoc signed, ~no runtime dependencies.
 
 ## How Wake-on-LAN works here
@@ -81,25 +82,11 @@ Use the **wired Ethernet** MAC — Wi-Fi usually can't wake a powered-off machin
 - **Windows:** Device Manager → network adapter → *Power Management* → check *Allow this device to wake the computer* and *Only allow a magic packet…*. Disable **Fast Startup** (Control Panel → Power Options), which blocks WoL.
 - Keep the PC on **wired Ethernet**.
 
-## Launch at login (optional)
+## Launch at login
 
-A LaunchAgent plist is the simplest way:
+Click the menu bar icon → **Launch at Login** to toggle it (a checkmark shows when enabled). It uses macOS's `SMAppService`, so it also appears under **System Settings → General → Login Items**.
 
-```sh
-cat > ~/Library/LaunchAgents/local.wakemenu.plist <<'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>Label</key><string>local.wakemenu</string>
-  <key>ProgramArguments</key><array><string>/Applications/WakeMenu.app/Contents/MacOS/WakeMenu</string></array>
-  <key>RunAtLoad</key><true/>
-  <key>LimitLoadToSessionType</key><string>Aqua</string>
-</dict></plist>
-PLIST
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.wakemenu.plist
-```
-
-Undo: `launchctl bootout gui/$(id -u)/local.wakemenu && rm ~/Library/LaunchAgents/local.wakemenu.plist`
+> Tip: move `WakeMenu.app` to **/Applications** before enabling, so it launches from a stable location.
 
 ## How status detection works
 

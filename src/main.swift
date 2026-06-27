@@ -1,5 +1,6 @@
 import AppKit
 import Darwin
+import ServiceManagement
 
 // MARK: - Model
 
@@ -477,6 +478,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSTabl
         manage.target = self
         menu.addItem(manage)
 
+        let launch = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
+        launch.target = self
+        launch.state = (SMAppService.mainApp.status == .enabled) ? .on : .off
+        menu.addItem(launch)
+
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
@@ -526,6 +532,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSTabl
         rebuildMenu()
         pcTable?.reloadData()
         refreshStatuses()
+    }
+
+    @objc private func toggleLaunchAtLogin() {
+        do {
+            if SMAppService.mainApp.status == .enabled {
+                try SMAppService.mainApp.unregister()
+            } else {
+                try SMAppService.mainApp.register()
+            }
+        } catch {
+            showAlert(title: "Couldn't change Launch at Login", body: error.localizedDescription)
+        }
+        rebuildMenu()
     }
 
     // Menu selectors → index helpers
