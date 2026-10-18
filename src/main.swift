@@ -195,28 +195,64 @@ enum Pinger {
     /// is given, only entries on that interface — so a stale entry left on another (multi-homed)
     /// interface for a powered-off host is ignored.
     static func arpMapByMAC(onInterface iface: String? = nil) -> [String: String] {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/sbin/arp")
-        p.arguments = ["-a", "-n"]
-        let pipe = Pipe()
-        p.standardOutput = pipe
-        p.standardError = Pipe()
-        do { try p.run() } catch { return [:] }
-        p.waitUntilExit()
-        let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         var map: [String: String] = [:]
-        for line in out.split(separator: "\n") {
-            if line.contains("incomplete") { continue }
-            if let iface, !line.contains(" on \(iface) ") && !line.contains(" on \(iface)\t") { continue }
-            guard let ipStart = line.firstIndex(of: "("), let ipEnd = line.firstIndex(of: ")"),
-                  let at = line.range(of: " at ") else { continue }
-            let ip = String(line[line.index(after: ipStart)..<ipEnd])
-            let rest = line[at.upperBound...]
-            guard let macTok = rest.split(separator: " ").first.map(String.init),
-                  let mac = canonMAC(macTok) else { continue }
-            map[mac] = ip   // first/any IP for this MAC is fine on a flat LAN
+        for e in arpTable() where (iface == nil || e.iface == iface) && map[e.mac] == nil {
+            map[e.mac] = e.ip   // first IP for this MAC is fine on a flat LAN
         }
         return map
+    }
+
+    /// Complete ARP entries (canonical MAC) read straight from the kernel routing table.
+    /// Read in-process rather than via `/usr/sbin/arp`: on macOS 27 the `arp` child process
+    /// prints an empty table when spawned from the app, so the scan found nothing.
+    static func arpTable() -> [(ip: String, mac: String, iface: String)] {
+        var mib: [Int32] = [CTL_NET, PF_ROUTE, 0, AF_INET, NET_RT_FLAGS, RTF_LLINFO]
+        var len = 0
+        var buf: [UInt8] = []
+        var ok = false
+        for _ in 0..<3 {
+            guard sysctl(&mib, 6, nil, &len, nil, 0) == 0, len > 0 else { return [] }
+            len += len / 8 + 512   // slack: the table can grow between the two calls (e.g. mid-sweep)
+            buf = [UInt8](repeating: 0, count: len)
+            if sysctl(&mib, 6, &buf, &len, nil, 0) == 0 { ok = true; break }
+            guard errno == ENOMEM else { return [] }
+        }
+        guard ok else { return [] }
+        var out: [(ip: String, mac: String, iface: String)] = []
+        buf.withUnsafeBytes { raw in
+            var off = 0
+            // Each message: rt_msghdr, then sockaddr_in (IP), then sockaddr_dl (MAC + if index),
+            // each sockaddr padded to 4 bytes. sockaddr_dl is read by field offset because the
+            // kernel may hand back one shorter than the full struct.
+            while off + MemoryLayout<rt_msghdr>.size <= len {
+                let rtm = raw.loadUnaligned(fromByteOffset: off, as: rt_msghdr.self)
+                let msgEnd = off + Int(rtm.rtm_msglen)
+                defer { off = msgEnd }
+                guard rtm.rtm_msglen > 0, msgEnd <= len else { break }
+                let sinOff = off + MemoryLayout<rt_msghdr>.size
+                guard sinOff + MemoryLayout<sockaddr_in>.size <= msgEnd else { continue }
+                let sin = raw.loadUnaligned(fromByteOffset: sinOff, as: sockaddr_in.self)
+                let sinLen = Int(sin.sin_len)
+                let sdlOff = sinOff + (sinLen > 0 ? (sinLen + 3) & ~3 : 4)
+                guard sdlOff + 8 <= msgEnd else { continue }
+                // sdl_family @1, sdl_index @2 (u16), sdl_nlen @5, sdl_alen @6, sdl_data @8
+                let family = raw[sdlOff + 1]
+                let ifIndex = raw.loadUnaligned(fromByteOffset: sdlOff + 2, as: UInt16.self)
+                let nlen = Int(raw[sdlOff + 5]), alen = raw[sdlOff + 6]
+                // alen 0 = incomplete entry (no MAC resolved yet)
+                guard family == UInt8(AF_LINK), alen == 6 else { continue }
+                let macStart = sdlOff + 8 + nlen
+                guard macStart + 6 <= msgEnd else { continue }
+                let mac = (0..<6).map { String(format: "%02x", raw[macStart + $0]) }.joined(separator: ":")
+                var name = [CChar](repeating: 0, count: Int(IF_NAMESIZE))
+                let iface = if_indextoname(UInt32(ifIndex), &name) != nil ? String(cString: name) : ""
+                var addr = sin.sin_addr
+                var ipBuf = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+                guard inet_ntop(AF_INET, &addr, &ipBuf, socklen_t(INET_ADDRSTRLEN)) != nil else { continue }
+                out.append((String(cString: ipBuf), mac, iface))
+            }
+        }
+        return out
     }
 
     /// Resolve a MAC to its current IP: read ARP; if absent, sweep once and re-read.
