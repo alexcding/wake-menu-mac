@@ -24,12 +24,20 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleExecutable</key><string>WakeMenu</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>LSUIElement</key><true/>
+    <key>NSLocalNetworkUsageDescription</key><string>WakeMenu scans your local network to find PCs, checks whether they're online, and sends Wake-on-LAN packets.</string>
     <key>NSHumanReadableCopyright</key><string>WakeMenu</string>
 </dict>
 </plist>
 PLIST
 
-swiftc -O -o "$BIN" src/main.swift -framework AppKit
+# Universal binary (Apple silicon + Intel). Pin the deployment target to LSMinimumSystemVersion;
+# otherwise swiftc targets the build host's macOS.
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+for ARCH in arm64 x86_64; do
+    swiftc -O -target "$ARCH-apple-macos13" -o "$TMP/WakeMenu-$ARCH" src/main.swift -framework AppKit
+done
+lipo -create -output "$BIN" "$TMP/WakeMenu-arm64" "$TMP/WakeMenu-x86_64"
 chmod +x "$BIN"
 
 # Ad-hoc codesign so it runs without "damaged" warnings
