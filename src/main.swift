@@ -229,15 +229,23 @@ enum Pinger {
     }
 
     /// Canonical MAC: 6 colon-separated 2-digit lowercase hex octets, or nil.
+    /// Accepts aa:bb:…, aa-bb-…, aabb.ccdd.eeff, aabbccddeeff, and arp's unpadded octets ("0:1a:…").
     static func canonMAC(_ s: String) -> String? {
-        let octets = s.split(separator: ":")
-        guard octets.count == 6 else { return nil }
-        var out = [String]()
-        for o in octets {
-            guard o.count <= 2, UInt8(o, radix: 16) != nil else { return nil }
-            out.append((o.count == 1 ? "0" + o : String(o)).lowercased())
+        let tokens = s.split(whereSeparator: { $0 == ":" || $0 == "-" || $0 == "." }).map(String.init)
+        guard tokens.allSatisfy({ !$0.isEmpty && $0.allSatisfy(\.isHexDigit) }) else { return nil }
+        var octets: [String]
+        switch tokens.count {
+        case 6:
+            guard tokens.allSatisfy({ $0.count <= 2 }) else { return nil }
+            octets = tokens.map { $0.count == 1 ? "0" + $0 : $0 }
+        case 3, 1:
+            guard tokens.allSatisfy({ $0.count == 12 / tokens.count }) else { return nil }
+            let hex = Array(tokens.joined())
+            octets = stride(from: 0, to: 12, by: 2).map { String(hex[$0..<$0 + 2]) }
+        default:
+            return nil
         }
-        return out.joined(separator: ":")
+        return octets.joined(separator: ":").lowercased()
     }
 }
 
